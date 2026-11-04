@@ -12,6 +12,12 @@ Meta SAM 3.1 tracks an object in your video. MotionForge fits its bounding-box c
 
 Meta SAM 3.1 supplies tracked boxes. MotionForge associates them with source-frame timestamps, measures bounding-box centers, and fits a deterministic damped oscillation. No custom neural training is involved.
 
+## Preview
+
+![MotionForge with a selected oscillator, interactive spring preview, source-versus-model graph, and JavaScript export](assets/motionforge-workflow.png)
+
+Screenshot from the validated live-SAM workflow. Oscillator footage by [Pieter Kuiper](https://commons.wikimedia.org/wiki/File:Oscillatory_motion_acceleration.ogv), used with attribution.
+
 ## Run locally
 
 Requires Node.js 22.9+ and `ffmpeg` / `ffprobe` on your PATH. No npm dependencies or GPU are required.
@@ -93,7 +99,7 @@ The earlier diagnostic viewer remains available through `node spike/serve-viewer
 
 ## Demo footage and third-party notices
 
-Physical oscillator footage: [“Oscillatory motion acceleration” by Pieter Kuiper](https://commons.wikimedia.org/wiki/File:Oscillatory_motion_acceleration.ogv). Its source page permits reuse, derivatives, and commercial use with attribution to **Pieter Kuiper**. The local validation clip trims seconds 6–14, removes audio, and converts to H.264 at 640 × 480, 30 fps. Media and captures are not included in this repository. Retain this credit in any published demonstration using that footage.
+Physical oscillator footage: [“Oscillatory motion acceleration” by Pieter Kuiper](https://commons.wikimedia.org/wiki/File:Oscillatory_motion_acceleration.ogv). Its source page permits reuse, derivatives, and commercial use with attribution to **Pieter Kuiper**. The local validation clip trims seconds 6–14, removes audio, and converts to H.264 at 640 × 480, 30 fps. Source videos and raw tracking captures are not included in this repository. The README screenshot contains an attributed still from the validation clip. Retain this credit in any published demonstration using that footage.
 
 Geist fonts are by Vercel in collaboration with basement.studio, distributed under the [SIL Open Font License](web/fonts/OFL.txt). UI primitive styles and the GitHub icon include adaptations from shadcn/ui and Motion Primitives; their MIT notices are retained in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
