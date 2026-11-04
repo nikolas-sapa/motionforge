@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MotionForge Diagnostic Spike Viewer</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e0f11;
+    --panel: #16181c;
+    --border: #2a2d33;
+    --text: #e8eaed;
+    --muted: #9aa0a8;
+    --accent: #006bff;
+    --accent-text: #3291ff;
+    --danger: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Geist Sans", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input[type="file"], select, button {
+    font: inherit;
+    background: #0b0c0e;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 220px; }
+  .status { font-size: 14px; margin-top: 10px; }
+  .status.error { color: var(--danger); }
+  .status.info { color: var(--accent-text); }
+  .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .videowrap { position: relative; display: inline-block; max-width: 100%; background: #000; }
+  video { display: block; max-width: 100%; max-height: 480px; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #chart, #simcanvas { display: block; width: 100%; background: #0b0c0e; border: 1px solid var(--border); border-radius: 6px; }
+  .legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 12px; vertical-align: -1px; }
+  #provenance { white-space: pre-wrap; color: var(--text); }
+  #handle {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #fff;
+    cursor: grab;
+    touch-action: none;
+    transform: translate(-50%, -50%);
+  }
+  #handle:active { cursor: grabbing; }
+  #simwrap { position: relative; height: 80px; border: 1px solid var(--border); border-radius: 6px; background: #0b0c0e; overflow: hidden; }
+  #centerline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+  .small { font-size: 12px; color: var(--muted); }
+  a { color: var(--accent-text); }
+</style>
+</head>
+<body>
+<main>
+  <h1>MotionForge diagnostic spike viewer</h1>
+  <p class="small">Manual inspection of a SAM tracking result against its source video. Diagnostic only, not production UI.</p>
+
+  <section>
+    <h2>Inputs</h2>
+    <div class="row">
+      <div>
+        <label for="videofile">Video file (MP4/MOV), stays local</label>
+        <input id="videofile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov">
+      </div>
+      <div>
+        <label for="jsonfile">SAM result JSON, stays local</label>
+        <input id="jsonfile" type="file" accept="application/json,.json">
+      </div>
+      <div>
+        <label for="trackselect">Tracked object (explicit selection required)</label>
+        <select id="trackselect" disabled>
+          <option value="">No result loaded</option>
+        </select>
+      </div>
+    </div>
+    <p id="loadstatus" class="status info" role="status">No video or tracking result loaded. Live SAM not verified.</p>
+  </section>
+
+  <section>
+    <h2>Provenance</h2>
+    <p id="provenance" class="mono">none</p>
+  </section>
+
+  <section>
+    <h2>Video and bounding-box overlay</h2>
+    <div class="videowrap">
+      <video id="video" controls preload="metadata"></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <p id="overlaystatus" class="status info" role="status">No observation at this frame.</p>
+  </section>
+
+  <section>
+    <h2>Fit</h2>
+    <p id="fitstatus" class="status info" role="status">No fit. Verify video hash and select a track.</p>
+    <div id="fitdetails" class="mono" hidden></div>
+  </section>
+
+  <section>
+    <h2>Observed vs predicted (selected axis)</h2>
+    <canvas id="chart" width="1000" height="320"></canvas>
+    <p class="legend">
+      <span class="swatch" style="background:#e8eaed"></span>observed center
+      <span class="swatch" style="background:#006bff"></span>predicted
+    </p>
+  </section>
+
+  <section>
+    <h2>Interactive spring simulation</h2>
+    <p class="small">New initial-condition simulation using fitted parameters. Not a replay of the video track.</p>
+    <div id="simwrap">
+      <div id="centerline"></div>
+      <div id="handle" role="slider" aria-label="Spring release offset handle" tabindex="0" aria-valuemin="-160" aria-valuemax="160" aria-valuenow="0"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="release80" type="button" disabled>Release from 80px</button>
+      <button id="stopbtn" type="button" disabled>Stop simulation</button>
+      <button id="exportbtn" type="button" disabled>Download JavaScript spring</button>
+    </div>
+    <p id="simstatus" class="status info" role="status">Simulation requires a fitted result.</p>
+  </section>
+</main>
+
+<script type="module">
+import { fitMotion, predictMotion, springState } from '/src/motion-fit.mjs';
+import { validateResult, verifyCapture } from '/spike/viewer-state.mjs';
+import { exportSpring } from '/src/export-spring.mjs';
+
+const $ = (id) => document.getElementById(id);
+const videoInput = $('videofile');
+const jsonInput = $('jsonfile');
+const trackSelect = $('trackselect');
+const loadStatus = $('loadstatus');
+const provenanceEl = $('provenance');
+const video = $('video');
+const overlay = $('overlay');
+const overlayStatus = $('overlaystatus');
+const fitStatus = $('fitstatus');
+const fitDetails = $('fitdetails');
+const chart = $('chart');
+const handle = $('handle');
+const simwrap = $('simwrap');
+const centerline = $('centerline');
+const release80 = $('release80');
+const stopbtn = $('stopbtn');
+const exportbtn = $('exportbtn');
+const simStatus = $('simstatus');
+
+const state = {
+  videoFile: null,
+  videoHash: null,
+  videoUrl: null,
+  videoGeneration: 0,
+  jsonGeneration: 0,
+  metadataReady: false,
+  inputError: null,
+  result: null,
+  selectedTrack: null,
+  fit: null,
+  sim: { running: false, raf: 0, startTime: 0, releaseOffset: 0 },
+};
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function setStatus(el, msg, kind) {
+  el.textContent = msg;
+  el.className = 'status ' + (kind || 'info');
+}
+
+function clearFit() {
+  state.fit = null;
+  state.selectedTrack = null;
+  trackSelect.value = '';
+  setStatus(fitStatus, 'No fit. Verify video hash and select a track.', 'info');
+  fitDetails.hidden = true;
+  fitDetails.textContent = '';
+  release80.disabled = true;
+  stopbtn.disabled = true;
+  exportbtn.disabled = true;
+  stopSim();
+  dragging = false;
+  layoutHandle(0);
+  handle.setAttribute('aria-disabled', 'true');
+  setStatus(simStatus, 'Simulation requires a fitted result.', 'info');
+  chart.getContext('2d').clearRect(0, 0, chart.width, chart.height);
+  clearOverlay();
+}
+
+function clearOverlay() {
+  const ctx = overlay.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  setStatus(overlayStatus, 'No observation at this frame.', 'info');
+}
+
+function captureGate() {
+  const gate = verifyCapture({
+    videoHash: state.videoHash,
+    result: state.result,
+    videoWidth: video.videoWidth,
+    videoHeight: video.videoHeight,
+    metadataReady: state.metadataReady && video.readyState >= 1
+      && video.currentSrc === state.videoUrl,
+  });
+  if (!gate.ok) {
+    trackSelect.disabled = true;
+    clearFit();
+    setStatus(loadStatus, state.inputError || (state.result?.tracks.length === 0 ? 'No objects found. ' : '') + gate.reason, 'error');
+    return false;
+  }
+  trackSelect.disabled = state.result.tracks.length === 0;
+  if (trackSelect.disabled) {
+    clearFit();
+    setStatus(loadStatus, 'No objects found.', 'info');
+    return false;
+  }
+  return true;
+}
+
+function fail(msg, sticky = false) {
+  state.inputError = sticky ? msg : null;
+  state.result = null;
+  clearFit();
+  trackSelect.replaceChildren();
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = 'No result loaded';
+  trackSelect.append(opt);
+  trackSelect.disabled = true;
+  provenanceEl.textContent = 'none';
+  setStatus(loadStatus, msg, 'error');
+}
+
+function describeProvenance(doc) {
+  const p = doc.provenance;
+  return [
+    'kind: ' + p.kind,
+    'model: ' + p.model,
+    'responseId: ' + p.responseId,
+    'measurement: ' + p.measurement,
+    'source.name: ' + p.source.name,
+    'source.sha256: ' + p.source.sha256,
+    'source.fileId: ' + p.source.fileId,
+    'bounding-box center, approximate observed motion; physical mass/stiffness not recovered.',
+  ].join('\n');
+}
+
+async function sha256Hex(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function maybeEnableFit() {
+  if (!captureGate()) return;
+  setStatus(loadStatus, 'Video hash verified against capture. Select a tracked object.', 'info');
+  if (state.selectedTrack) runFit();
+}
+
+videoInput.addEventListener('change', async () => {
+  const generation = ++state.videoGeneration;
+  state.inputError = null;
+  state.metadataReady = false;
+  clearFit();
+  trackSelect.disabled = true;
+  setStatus(overlayStatus, 'No observation at this frame.', 'info');
+  const file = videoInput.files[0];
+  state.videoFile = file || null;
+  state.videoHash = null;
+  if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
+  state.videoUrl = null;
+  video.onloadedmetadata = null;
+  video.onerror = null;
+  video.removeAttribute('src');
+  video.load();
+  if (!file) {
+    setStatus(loadStatus, state.result ? 'Video removed. Load a video to re-verify.' : 'No video or tracking result loaded. Live SAM not verified.', 'info');
+    return;
+  }
+  try {
+    setStatus(loadStatus, 'Hashing video locally...', 'info');
+    const buffer = await file.arrayBuffer();
+    if (generation !== state.videoGeneration) return;
+    const hash = await sha256Hex(buffer);
+    if (generation !== state.videoGeneration) return;
+    state.videoHash = hash;
+    state.videoUrl = URL.createObjectURL(file);
+    const url = state.videoUrl;
+    video.onloadedmetadata = () => {
+      if (generation !== state.videoGeneration || video.currentSrc !== url || video.readyState < 1) return;
+      state.metadataReady = true;
+      maybeEnableFit();
+      updateOverlay();
+    };
+    video.onerror = () => {
+      if (generation !== state.videoGeneration) return;
+      state.metadataReady = false;
+      state.inputError = 'Video metadata could not be loaded.';
+      captureGate();
+      setStatus(loadStatus, state.inputError, 'error');
+    };
+    video.src = state.videoUrl;
+    setStatus(loadStatus, 'Video loaded. sha256 ' + state.videoHash.slice(0, 16) + '...', 'info');
+  } catch (e) {
+    if (generation !== state.videoGeneration) return;
+    state.inputError = 'Video read/hash failed: ' + e.message;
+    setStatus(loadStatus, state.inputError, 'error');
+    return;
+  }
+  maybeEnableFit();
+});
+
+jsonInput.addEventListener('change', async () => {
+  const generation = ++state.jsonGeneration;
+  const file = jsonInput.files[0];
+  fail('Loading result JSON...');
+  if (!file) {
+    fail('No video or tracking result loaded. Live SAM not verified.');
+    return;
+  }
+  try {
+    const text = await file.text();
+    if (generation !== state.jsonGeneration) return;
+    const doc = validateResult(JSON.parse(text));
+    state.result = doc;
+    provenanceEl.textContent = describeProvenance(doc);
+    trackSelect.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = doc.tracks.length ? 'Select tracked object...' : 'No objects found';
+    trackSelect.append(placeholder);
+    for (const track of doc.tracks) {
+      const opt = document.createElement('option');
+      opt.value = track.objectId;
+      opt.textContent = track.objectId + ' (' + track.samples.length + ' samples)';
+      trackSelect.append(opt);
+    }
+    setStatus(loadStatus, doc.tracks.length
+      ? 'Result verified. ' + doc.tracks.length + ' track(s). Select an object explicitly.'
+      : 'No objects found.', 'info');
+  } catch (e) {
+    if (generation !== state.jsonGeneration) return;
+    fail('Invalid result JSON: ' + e.message, true);
+    return;
+  }
+  maybeEnableFit();
+});
+
+trackSelect.addEventListener('change', () => {
+  const id = trackSelect.value;
+  clearFit();
+  if (!captureGate()) return;
+  state.selectedTrack = id ? state.result.tracks.find((t) => t.objectId === id) : null;
+  trackSelect.value = state.selectedTrack ? id : '';
+  if (state.selectedTrack) {
+    runFit();
+    updateOverlay();
+  } else if (!state.selectedTrack) setStatus(fitStatus, 'No track selected.', 'info');
+});
+
+function runFit() {
+  if (!captureGate()) return;
+  const track = state.selectedTrack;
+  if (!track) return;
+  const fit = fitMotion(track.samples, { axis: 'auto' });
+  if (fit.status === 'rejected') {
+    state.fit = null;
+    release80.disabled = true;
+    stopbtn.disabled = true;
+    exportbtn.disabled = true;
+    stopSim();
+    setStatus(fitStatus, 'Fit rejected: ' + fit.reason + '. Interactive preview disabled.', 'error');
+    fitDetails.hidden = true;
+    fitDetails.textContent = '';
+    drawChart();
+    return;
+  }
+  state.fit = fit;
+  const p = fit.parameters;
+  const m = fit.metrics;
+  setStatus(fitStatus, 'Fitted on axis ' + fit.axis + ' (' + m.sampleCount + ' samples, ' + m.duration.toFixed(2) + ' s).', 'info');
+  fitDetails.hidden = false;
+  fitDetails.textContent = [
+    'axis: ' + fit.axis,
+    'frequencyHz: ' + p.frequencyHz.toFixed(4),
+    'decay: ' + p.decay.toFixed(4),
+    'omega: ' + p.omega.toFixed(4),
+    'offset: ' + p.offset.toFixed(3) + ' px',
+    'mass: ' + p.mass + ' (simulation convention)',
+    'stiffness: ' + p.stiffness.toFixed(4),
+    'damping: ' + p.damping.toFixed(4),
+    'trainNrmse: ' + m.trainNrmse.toFixed(4),
+    'holdoutNrmse: ' + m.holdoutNrmse.toFixed(4),
+    '(NRMSE: fraction of 5th-95th percentile observed span; interleaved held-out observations, not a future prediction.)',
+    'maxNormalizedError: ' + m.maxNormalizedError.toFixed(4),
+  ].join('\n');
+  release80.disabled = false;
+  exportbtn.disabled = false;
+  handle.setAttribute('aria-disabled', 'false');
+  setStatus(simStatus, 'Drag handle and release, or press "Release from 80px".', 'info');
+  drawChart();
+}
+
+function sourceRect() {
+  const cw = overlay.clientWidth;
+  const ch = overlay.clientHeight;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!cw || !ch || !vw || !vh) return null;
+  const scale = Math.min(cw / vw, ch / vh);
+  const w = vw * scale;
+  const h = vh * scale;
+  return { x: (cw - w) / 2, y: (ch - h) / 2, scale };
+}
+
+function updateOverlay() {
+  if (!captureGate()) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cw = overlay.clientWidth;
+  const ch = overlay.clientHeight;
+  if (overlay.width !== cw * dpr || overlay.height !== ch * dpr) {
+    overlay.width = cw * dpr;
+    overlay.height = ch * dpr;
+  }
+  const ctx = overlay.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  const track = state.selectedTrack;
+  const res = state.result;
+  const rect = sourceRect();
+  if (!track || !res || !rect || !video.videoWidth) return;
+  const time = video.currentTime;
+  const ts = res.video.timestamps;
+  let bestIdx = -1;
+  let bestDt = Infinity;
+  for (let i = 0; i < ts.length; i += 1) {
+    const d = Math.abs(ts[i] - time);
+    if (d < bestDt) { bestDt = d; bestIdx = i; }
+  }
+  const sample = track.samples.find((s) => s.frameIndex === bestIdx);
+  if (!sample) {
+    setStatus(overlayStatus, 'No observation at this frame.', 'info');
+    return;
+  }
+  const b = sample.box;
+  ctx.strokeStyle = '#006bff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(rect.x + b.x1 * rect.scale, rect.y + b.y1 * rect.scale,
+    (b.x2 - b.x1) * rect.scale, (b.y2 - b.y1) * rect.scale);
+  ctx.fillStyle = '#006bff';
+  ctx.beginPath();
+  ctx.arc(rect.x + sample.x * rect.scale, rect.y + sample.y * rect.scale, 3, 0, Math.PI * 2);
+  ctx.fill();
+  setStatus(overlayStatus, 'Frame ' + sample.frameIndex + ' @ ' + sample.t.toFixed(3) + 's, box ['
+    + b.x1.toFixed(1) + ', ' + b.y1.toFixed(1) + ', ' + b.x2.toFixed(1) + ', ' + b.y2.toFixed(1) + ']', 'info');
+}
+
+video.addEventListener('timeupdate', updateOverlay);
+video.addEventListener('seeked', updateOverlay);
+window.addEventListener('resize', updateOverlay);
+
+function drawChart() {
+  if (!captureGate()) return;
+  const ctx = chart.getContext('2d');
+  const w = chart.width;
+  const h = chart.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0b0c0e';
+  ctx.fillRect(0, 0, w, h);
+  const track = state.selectedTrack;
+  if (!track) {
+    ctx.fillStyle = '#9aa0a8';
+    ctx.font = '13px system-ui';
+    ctx.fillText('Select a track to chart observed samples.', 16, h / 2);
+    return;
+  }
+  const axis = state.fit ? state.fit.axis : 'x';
+  const t0 = track.samples[0].t;
+  const t1 = track.samples.at(-1).t;
+  const values = track.samples.map((s) => s[axis]);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (state.fit) {
+    for (let i = 0; i <= 200; i += 1) {
+      const v = predictMotion(state.fit.parameters, t0 + (t1 - t0) * (i / 200));
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+  }
+  const pad = (max - min) * 0.1 || 1;
+  min -= pad; max += pad;
+  const px = (t) => 40 + (w - 60) * ((t - t0) / (t1 - t0 || 1));
+  const py = (v) => h - 30 - (h - 60) * ((v - min) / (max - min));
+  ctx.strokeStyle = '#2a2d33';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(40, 10); ctx.lineTo(40, h - 30); ctx.lineTo(w - 20, h - 30);
+  ctx.stroke();
+  ctx.fillStyle = '#9aa0a8';
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.fillText(axis + ' px, ' + t0.toFixed(2) + 's -> ' + t1.toFixed(2) + 's', 44, 24);
+  ctx.fillText(max.toFixed(1), 4, 24);
+  ctx.fillText(min.toFixed(1), 4, h - 34);
+  if (state.fit) {
+    ctx.strokeStyle = '#006bff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 400; i += 1) {
+      const t = t0 + (t1 - t0) * (i / 400);
+      const v = predictMotion(state.fit.parameters, t);
+      if (i === 0) ctx.moveTo(px(t), py(v));
+      else ctx.lineTo(px(t), py(v));
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#e8eaed';
+  for (const s of track.samples) {
+    ctx.beginPath();
+    ctx.arc(px(s.t), py(s[axis]), 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function stopSim() {
+  if (state.sim.raf) cancelAnimationFrame(state.sim.raf);
+  state.sim.raf = 0;
+  state.sim.running = false;
+}
+
+function layoutHandle(offset) {
+  const r = simwrap.getBoundingClientRect();
+  const cx = r.width / 2;
+  centerline.style.left = cx + 'px';
+  const maxOffset = Math.min(160, cx - 20);
+  const clamped = Math.max(-maxOffset, Math.min(maxOffset, offset));
+  handle.style.left = (cx + clamped) + 'px';
+  handle.style.top = r.height / 2 + 'px';
+  handle.setAttribute('aria-valuenow', String(Math.round(clamped)));
+  return clamped;
+}
+
+function startSim(offset) {
+  stopSim();
+  if (!captureGate() || !state.fit) return;
+  state.sim.releaseOffset = offset;
+  state.sim.running = true;
+  state.sim.startTime = performance.now();
+  stopbtn.disabled = false;
+  setStatus(simStatus, 'Simulating new release from ' + Math.round(offset) + 'px offset (springState, not track replay).', 'info');
+  const step = (now) => {
+    if (!captureGate() || !state.fit || !state.sim.running) return;
+    const elapsed = (now - state.sim.startTime) / 1000;
+    const s = springState(state.fit.parameters, elapsed, { position: state.sim.releaseOffset, velocity: 0 });
+    layoutHandle(s.position);
+    state.sim.raf = requestAnimationFrame(step);
+  };
+  state.sim.raf = requestAnimationFrame(step);
+}
+
+let dragging = false;
+handle.addEventListener('pointerdown', (e) => {
+  if (!captureGate() || !state.fit) return;
+  stopSim();
+  dragging = true;
+  handle.setPointerCapture(e.pointerId);
+});
+handle.addEventListener('pointermove', (e) => {
+  if (!captureGate() || !dragging || !state.fit) return;
+  const r = simwrap.getBoundingClientRect();
+  layoutHandle(e.clientX - r.left - r.width / 2);
+});
+const endDrag = (e) => {
+  if (!captureGate()) return;
+  if (!dragging) return;
+  dragging = false;
+  if (handle.hasPointerCapture && e.pointerId != null && handle.hasPointerCapture(e.pointerId)) {
+    handle.releasePointerCapture(e.pointerId);
+  }
+  if (state.fit) {
+    const r = simwrap.getBoundingClientRect();
+    const offset = parseFloat(handle.style.left || '0') - r.width / 2;
+    if (reducedMotion) {
+      setStatus(simStatus, 'Reduced motion: release not auto-played. Press Enter on the handle or "Release from 80px" to start.', 'info');
+    } else {
+      startSim(offset);
+    }
+  }
+};
+handle.addEventListener('pointerup', endDrag);
+handle.addEventListener('pointercancel', () => { dragging = false; });
+handle.addEventListener('lostpointercapture', () => { dragging = false; });
+
+handle.addEventListener('keydown', (e) => {
+  if (!captureGate() || !state.fit) return;
+  const step = 8;
+  const r = simwrap.getBoundingClientRect();
+  const cur = parseFloat(handle.style.left || String(r.width / 2)) - r.width / 2;
+  if (e.key === 'ArrowLeft') { stopSim(); layoutHandle(cur - step); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { stopSim(); layoutHandle(cur + step); e.preventDefault(); }
+  else if (e.key === 'Enter' || e.key === ' ') {
+    stopSim();
+    startSim(parseFloat(handle.style.left || '0') - r.width / 2);
+    e.preventDefault();
+  }
+});
+
+release80.addEventListener('click', () => {
+  if (!captureGate() || !state.fit) return;
+  layoutHandle(80);
+  startSim(80);
+});
+stopbtn.addEventListener('click', () => {
+  stopSim();
+  stopbtn.disabled = true;
+  setStatus(simStatus, 'Simulation stopped.', 'info');
+});
+
+exportbtn.addEventListener('click', () => {
+  if (!captureGate() || !state.fit) return;
+  const source = exportSpring(state.fit);
+  const blob = new Blob([source], { type: 'text/javascript; charset=utf-8' });
+  const anchor = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  try {
+    anchor.href = url;
+    anchor.download = 'motionforge-spring.mjs';
+    document.body.append(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+});
+
+layoutHandle(0);
+handle.setAttribute('aria-disabled', 'true');
+</script>
+</body>
+</html>
