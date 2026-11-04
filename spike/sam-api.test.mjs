@@ -204,6 +204,70 @@ test("probe accepts a real two-second video", async (t) => {
   assert.equal(probe.timestamps[47], 1.958333);
 });
 
+test("seeded bridge sends exactly 2 requests, native frame 2, both directions, and retains sparse source frames 0 and 2", async (t) => {
+  const video = await makeTinyVideo(t);
+  const probe = await probeVideo(video);
+  const calls = [];
+  const seed = { frameIndex: 2, box: { x1: 10, y1: 10, x2: 50, y2: 40 } };
+  const frames = [0, 2].map((index) => wrap(line(index, [
+    rec(1, "x1=10;y1=10;x2=50;y2=40;w=160;h=120"),
+  ])));
+  const events = [
+    ...frames.map((delta) => ({ type: "response.output_text.delta", delta })),
+    { type: "response.completed", response: { status: "completed", id: "resp-unit-seeded" } },
+  ].map((value) => `data: ${JSON.stringify(value)}\n\n`).join("");
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    return calls.length === 1
+      ? new Response(JSON.stringify({ id: "file-unit-seeded" }), { headers: { "content-type": "application/json" } })
+      : new Response(events, { headers: { "content-type": "text/event-stream" } });
+  };
+  const capture = await trackVideo({ path: video, boxPrompt: seed, apiKey: "test-key", fetchImpl });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://api.meta.ai/v1/files");
+  assert.equal(calls[0].opts.body.get("purpose"), "user_data");
+  assert.equal(calls[1].url, "https://api.meta.ai/v1/responses");
+  assert.deepEqual(JSON.parse(calls[1].opts.body), {
+    model: "sam-3.1", stream: true,
+    input: [{ type: "message", role: "user", content: [
+      { type: "input_text", text: "<2f>1<|box;x1=10;y1=10;x2=50;y2=40;w=160;h=120|>" },
+      { type: "input_video", file_id: "file-unit-seeded" },
+    ] }],
+    metadata: { propagation_direction: "both" },
+  });
+  assert.equal(capture.provenance.responseId, "resp-unit-seeded");
+  assert.deepEqual(capture.tracks.map((track) => track.objectId), ["1"]);
+  assert.deepEqual(capture.tracks[0].samples.map(({ frameIndex, t, x, y }) => ({ frameIndex, t, x, y })), [
+    { frameIndex: 0, t: probe.timestamps[0], x: 30, y: 25 },
+    { frameIndex: 2, t: probe.timestamps[2], x: 30, y: 25 },
+  ]);
+});
+
+test("3 invalid seeded requests cause 0 fetches; a returned object 2 cannot replace explicitly selected object 1", async (t) => {
+  const video = await makeTinyVideo(t);
+  const seed = { frameIndex: 2, box: { x1: 10, y1: 10, x2: 50, y2: 40 } };
+  let calls = 0;
+  const noFetch = async () => { calls++; throw new Error("Unexpected unit transport call"); };
+  for (const input of [
+    { boxPrompt: { ...seed, frameIndex: 48 } },
+    { boxPrompt: { ...seed, box: { ...seed.box, x2: 160 } } },
+    { boxPrompt: seed, concept: "square" },
+  ]) await assert.rejects(trackVideo({ path: video, apiKey: "test-key", fetchImpl: noFetch, ...input }));
+  assert.equal(calls, 0);
+  const delta = wrap(line(0, [rec(2, "x1=10;y1=10;x2=50;y2=40;w=160;h=120")]));
+  const events = [
+    { type: "response.output_text.delta", delta },
+    { type: "response.completed", response: { status: "completed", id: "resp-unit-wrong-object" } },
+  ].map((value) => `data: ${JSON.stringify(value)}\n\n`).join("");
+  const fetchImpl = async () => ++calls === 1
+    ? new Response(JSON.stringify({ id: "file-unit-wrong-object" }))
+    : new Response(events, { headers: { "content-type": "text/event-stream" } });
+  await assert.rejects(
+    trackVideo({ path: video, boxPrompt: seed, apiKey: "test-key", fetchImpl }), /Unexpected object identity/,
+  );
+  assert.equal(calls, 2);
+});
+
 test("unrecognized response JSON is an error, not zero matches", async (t) => {
   const video = await makeTinyVideo(t);
   const calls = [];

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { makeBoxPrompt, readSamStream } from "./sam-stream.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -106,6 +107,8 @@ export async function probeVideo(filePath) {
       "ffprobe",
       [
         "-v", "error",
+        "-protocol_whitelist", "file",
+        "-f", "mov",
         "-select_streams", "v:0",
         "-show_frames",
         "-show_entries", "stream=width,height,codec_name,duration:format=duration:frame=best_effort_timestamp_time",
@@ -163,7 +166,9 @@ export async function probeVideo(filePath) {
 
 async function checkedJson(res, what) {
   if (!res.ok) {
-    throw new Error(`${what} failed with status ${res.status}`);
+    const error = new Error(`${what} failed with status ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
   let body;
   try {
@@ -174,14 +179,14 @@ async function checkedJson(res, what) {
   return body;
 }
 
-async function checkedFetch(fetchImpl, url, options, what) {
+async function checkedFetch(fetchImpl, url, options, what, readResponse = checkedJson) {
   let response;
   try {
     response = await fetchImpl(url, options);
   } catch {
     throw new Error(`${what} transport failed`);
   }
-  return checkedJson(response, what);
+  return readResponse(response, what);
 }
 
 function extractOutputText(response) {
@@ -202,12 +207,14 @@ function extractOutputText(response) {
   return null;
 }
 
-export async function trackVideo({ path: videoPath, concept, apiKey, fetchImpl = globalThis.fetch }) {
+export async function trackVideo({ path: videoPath, concept, boxPrompt, apiKey, fetchImpl = globalThis.fetch }) {
   if (typeof fetchImpl !== "function") throw new Error("no fetch implementation available");
   const key = typeof apiKey === "string" ? apiKey.trim() : "";
   if (!key) throw new Error("MODEL_API_KEY is required");
-  const prompt = typeof concept === "string" ? concept.trim() : "";
-  if (prompt.length < 1 || prompt.length > 120) {
+  let prompt = typeof concept === "string" ? concept.trim() : "";
+  const seeded = boxPrompt !== undefined;
+  if (seeded && concept !== undefined) throw new Error("Choose a concept or a box, not both");
+  if (!seeded && (prompt.length < 1 || prompt.length > 120)) {
     throw new Error("concept must be a 1..120 character noun phrase");
   }
   const ext = path.extname(videoPath).toLowerCase();
@@ -219,6 +226,7 @@ export async function trackVideo({ path: videoPath, concept, apiKey, fetchImpl =
     throw new Error("video size must be 1..25MiB");
   }
   const probe = await probeVideo(videoPath);
+  if (seeded) prompt = makeBoxPrompt(boxPrompt, probe);
   const fileBytes = await readFile(videoPath);
   const sha256 = createHash("sha256").update(fileBytes).digest("hex");
 
@@ -239,7 +247,7 @@ export async function trackVideo({ path: videoPath, concept, apiKey, fetchImpl =
 
   const requestBody = {
     model: MODEL,
-    stream: false,
+    stream: seeded,
     input: [
       {
         type: "message",
@@ -251,24 +259,28 @@ export async function trackVideo({ path: videoPath, concept, apiKey, fetchImpl =
       },
     ],
   };
-  const response = await checkedFetch(fetchImpl, `${API_ORIGIN}/v1/responses`, {
+  if (seeded) requestBody.metadata = { propagation_direction: "both" };
+  const payload = await checkedFetch(fetchImpl, `${API_ORIGIN}/v1/responses`, {
     method: "POST",
     headers: { ...authHeaders, "content-type": "application/json" },
     body: JSON.stringify(requestBody),
     redirect: "error",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  }, "segmentation request");
+  }, "segmentation request", seeded ? readSamStream : checkedJson);
+  const response = seeded ? payload.response : payload;
   if (response?.status !== "completed" || typeof response?.id !== "string") {
     throw new Error("segmentation response did not complete");
   }
-  const outputText = extractOutputText(response);
+  let outputText = seeded ? payload.text ?? extractOutputText(response) : extractOutputText(response);
   if (outputText === null) {
     throw new Error("segmentation response missing output_text");
   }
+  if (seeded) outputText = outputText.replace(/\|>(?=<\d+f>)/g, "|>\n");
   const records = parseSamBoxes(outputText);
 
   const byObject = new Map();
   for (const rec of records) {
+    if (seeded && rec.objectId !== "1") throw new Error("Unexpected object identity in seeded response");
     if (rec.frameIndex >= probe.frameCount) {
       throw new Error(`record frame ${rec.frameIndex} outside source video`);
     }

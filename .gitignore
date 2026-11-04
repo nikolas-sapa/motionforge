@@ -7,3 +7,7 @@ node_modules/
 captures/
 uploads/
 results/
+*.mp4
+*.mov
+*.ogv
+*.webm

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Turn observed object motion into reusable, interactive JavaScript springs.">
+  <title>MotionForge · Motion, sampled.</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preload" href="/fonts/GeistSans.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/GeistSans-Semibold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="wordmark" href="/" aria-label="MotionForge home">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" stroke="currentColor"/><path d="M6 16V8h3l3 8 3-8h3v8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        MotionForge
+      </a>
+      <nav aria-label="Project">
+        <span class="model-label">Meta SAM 3.1</span>
+        <a class="github-link" href="https://github.com/nikolas-sapa/motionforge" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="headline">
+      <p class="eyebrow">A motion tool for developers</p>
+      <h1 id="headline">Motion, sampled.</h1>
+      <p class="tagline">Turn observed movement into interactive JavaScript.</p>
+    </section>
+    <ol class="process" aria-label="Workflow">
+      <li id="step-source" aria-current="step"><span>01</span> Source</li>
+      <li id="step-object"><span>02</span> Object</li>
+      <li id="step-spring"><span>03</span> Spring</li>
+    </ol>
+    <div class="workspace">
+      <section class="source-column" aria-labelledby="source-heading">
+        <div class="section-heading">
+          <h2 id="source-heading">Source</h2>
+          <label class="button button-quiet button-small" for="videofile">Choose video</label>
+        </div>
+        <input class="sr-only" id="videofile" type="file" accept="video/mp4,video/quicktime,.mp4,.mov">
+        <label id="dropzone" class="dropzone" for="videofile">
+          <span class="drop-mark" aria-hidden="true">+</span>
+          <strong>Start with a real movement</strong>
+          <span>Drop a video here, or choose a file</span>
+          <span class="caption">MP4 / MOV · 2–10 seconds · fixed camera</span>
+        </label>
+        <div id="videostage" class="video-stage" hidden>
+          <video id="video" preload="metadata" muted playsinline></video>
+          <canvas id="overlay" aria-label="Draw a rectangle around one object in the paused frame"></canvas>
+        </div>
+        <div class="transport">
+          <button id="playbtn" class="button button-small" type="button" disabled>Play</button>
+          <label class="sr-only" for="frameslider">Source frame</label>
+          <input id="frameslider" type="range" min="0" max="0" value="0" step="1" disabled>
+          <output id="framereadout" class="frame-readout" for="frameslider">Frame —</output>
+        </div>
+        <p id="sourceinfo" class="caption source-info">No source loaded. Files stay on your local server until you track.</p>
+        <div class="object-section">
+          <div class="section-heading">
+            <h2>Object</h2>
+            <label class="button button-quiet button-small" for="capturefile">Import saved capture</label>
+          </div>
+          <input id="capturefile" class="sr-only" type="file" accept=".json,application/json">
+          <p id="roistatus" class="body-secondary">Pause on a frame, then draw a rectangle around one object.</p>
+          <div id="objectfield" class="object-field" hidden>
+            <label for="trackselect">Tracked object</label>
+            <select id="trackselect" disabled><option value="">Select an object</option></select>
+          </div>
+          <div class="track-row">
+            <span id="mode" class="caption">Rectangle prompt · no point guessing</span>
+            <button id="trackbtn" class="button primary" type="button" disabled>Track object</button>
+          </div>
+          <p id="healthstatus" class="caption">Checking local tracking availability…</p>
+        </div>
+      </section>
+      <section class="preview-column" aria-labelledby="preview-heading">
+        <div class="section-heading">
+          <h2 id="preview-heading">Interactive spring</h2>
+          <span class="caption">New initial conditions</span>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Preview target">
+          <button id="tab-dot" role="tab" data-target-tab="dot" aria-selected="true" aria-controls="previewstage" tabindex="0" disabled>Dot</button>
+          <button id="tab-button" role="tab" data-target-tab="button" aria-selected="false" aria-controls="previewstage" tabindex="-1" disabled>Button</button>
+          <button id="tab-toast" role="tab" data-target-tab="toast" aria-selected="false" aria-controls="previewstage" tabindex="-1" disabled>Toast</button>
+        </div>
+        <div id="previewstage" class="preview-stage" role="tabpanel" aria-labelledby="tab-dot">
+          <div class="stage-axis" aria-hidden="true"></div>
+          <p id="previewempty" class="preview-empty">A spring, not a playback.<br><span>Track an object or import a saved capture.</span></p>
+          <div id="target" class="spring-target" data-target="dot" role="slider" tabindex="0" aria-label="Spring displacement, drag to release" aria-valuemin="-160" aria-valuemax="160" aria-valuenow="0" aria-disabled="true" hidden><span id="targetlabel"></span></div>
+        </div>
+        <div class="preview-actions">
+          <button id="runbtn" class="button" type="button" disabled>Release from 80px</button>
+          <button id="stopbtn" class="button button-quiet" type="button" disabled>Stop</button>
+        </div>
+        <p id="simstatus" class="body-secondary">Drag and release. The fitted spring responds to your gesture.</p>
+        <p class="caption">Source video pauses during interaction. Arrow keys move the target; Enter releases it.</p>
+      </section>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">Choose a source video to begin.</p>
+    <p class="disclosure">Use public or approved clips. Tracking sends video to Meta. Your key stays on the local server.</p>
+    <section class="measurement" aria-labelledby="measurement-heading">
+      <div class="section-heading">
+        <div><h2 id="measurement-heading">Source vs. model</h2><p id="fitstatus" class="body-secondary">No fit yet. Observations will appear here.</p></div>
+        <div class="chart-legend"><span><i class="point-key"></i>Measured center</span><span><i class="line-key"></i>Fitted spring</span></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart" width="1100" height="230" aria-label="Observed source centers and fitted spring over source timestamps"></canvas>
+        <p id="chartempty" class="chart-empty">No observations loaded</p>
+      </div>
+      <dl class="metrics">
+        <div><dt>Frequency <span>Hz</span></dt><dd id="frequency">—</dd></div>
+        <div><dt>Decay <span>s⁻¹</span></dt><dd id="decay">—</dd></div>
+        <div><dt>Train NRMSE</dt><dd id="trainerror">—</dd></div>
+        <div><dt>Interleaved holdout NRMSE</dt><dd id="holdouterror">—</dd></div>
+      </dl>
+      <p class="caption">Holdout error measures interleaved observations, not future accuracy. Bounding-box centers approximate motion; mass and stiffness are not recovered physical properties.</p>
+    </section>
+    <section class="export-section" aria-labelledby="export-heading">
+      <div class="section-heading">
+        <div><h2 id="export-heading">Take the motion with you</h2><p class="body-secondary">Dependency-free JavaScript. Coefficients, not a recorded path.</p></div>
+        <div class="export-actions">
+          <button id="copybtn" class="button" type="button" disabled>Copy code</button>
+          <button id="exportbtn" class="button" type="button" disabled>Download JavaScript</button>
+        </div>
+      </div>
+      <div class="code-wrap"><p id="codeempty" class="caption">An accepted fit unlocks a reusable spring module.</p><pre><code id="code"></code></pre></div>
+    </section>
+    <footer><span>Observed motion. New possibilities.</span><span>Local workspace · SAM 3.1</span></footer>
+  </main>
+</body>
+</html>
