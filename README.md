@@ -2,7 +2,15 @@
 
 **Motion, sampled.** Turn observed object movement into reusable, interactive JavaScript springs.
 
+Built for the [Meta Global AI Developer Hackathon 2026](https://dev.meta.ai/events/global-hackathon): Indie Developer track, “Push the Frontier” problem statement. An independent prototype, not an official Meta product.
+
+**[Watch the 67-second demo](https://youtu.be/jpR7Zbpi3nQ)**
+
 Meta SAM 3.1 tracks an object in your video. MotionForge fits its bounding-box centers to a damped oscillation, then exports a spring that responds to **new** positions and velocities. It is not a video player or a replay of recorded coordinates.
+
+**Pipeline:** Video → box-seeded SAM 3.1 → source-indexed measurements → deterministic oscillation fit → interactive JavaScript.
+
+Meta SAM 3.1 supplies tracked boxes. MotionForge associates them with source-frame timestamps, measures bounding-box centers, and fits a deterministic damped oscillation. No custom neural training is involved.
 
 ## Run locally
 
@@ -56,6 +64,14 @@ Fit acceptance includes interleaved held-out observations. That error measures a
 
 The capability spike has passed on **one real physical oscillator clip**. This does not establish arbitrary-video reliability.
 
+## Verified demo scope
+
+- **Tracking:** 240/240 source-indexed observations from one physical oscillator clip.
+- **Fitting:** the unchanged fitter accepted the capture, with approximately 1.12% interleaved holdout NRMSE. This measures agreement within the observed clip, not future predictive accuracy.
+- **Interaction and export:** native browser checks verified drag/release, Stop/restart, Dot/Button/Toast targets, and an actual executable JavaScript download.
+
+The video shows a live SAM run followed by a clearly labeled replay of its saved response. The replay makes no new inference.
+
 ## Safety and privacy
 
 - Source SHA256, dimensions, schema, object identity, and source timestamps gate fitting and export.
@@ -81,4 +97,4 @@ Physical oscillator footage: [“Oscillatory motion acceleration” by Pieter Ku
 
 Geist fonts are by Vercel in collaboration with basement.studio, distributed under the [SIL Open Font License](web/fonts/OFL.txt). UI primitive styles and the GitHub icon include adaptations from shadcn/ui and Motion Primitives; their MIT notices are retained in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
-The application itself has no general reuse license selected and is marked `UNLICENSED`; third-party assets retain their own licenses.
+Original MotionForge code is licensed under MIT ([LICENSE](LICENSE)). Third-party assets retain their separate licenses and notices. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
